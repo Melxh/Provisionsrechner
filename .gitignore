@@ -1,0 +1,17 @@
+node_modules
+dist
+.env
+.env.*
+!.env.example
+*.local
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+# Echte Kundendaten, Angebote, Exporte und Backups gehören NIE ins Repository
+backup/
+exports/
+*.csv
+*.dump
+*.sql.gz
+supabase/.temp
+supabase/.branches
