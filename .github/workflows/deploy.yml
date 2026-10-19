@@ -22,7 +22,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+          # Kein "cache: npm": setup-node bricht damit ohne package-lock.json ab.
+          # Sobald package-lock.json im Repository liegt, kann "cache: npm" wieder ergänzt werden.
       - name: Abhängigkeiten installieren
         run: |
           if [ -f package-lock.json ]; then npm ci; else npm install --no-audit --no-fund; fi

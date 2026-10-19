@@ -9,6 +9,8 @@ interface RulesContextValue {
   rules: RuleSet;
   /** 0 = noch keine eigene Version gespeichert, es gelten die Standardwerte. */
   version: number;
+  /** ID der aktiven Regelversion (null, solange nur Standardwerte gelten). */
+  ruleSetId: string | null;
   loading: boolean;
   error: string | null;
   /** Speichert die Regeln als NEUE, unveränderliche Version. Bestehende Aufträge bleiben unberührt. */
@@ -22,6 +24,7 @@ export function RulesProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const [rules, setRules] = useState<RuleSet>(DEFAULT_RULES);
   const [version, setVersion] = useState(0);
+  const [ruleSetId, setRuleSetId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,7 +33,7 @@ export function RulesProvider({ children }: { children: ReactNode }) {
     setError(null);
     try {
       const { data, error: err } = await requireClient()
-        .from('rule_sets').select('version, rules').order('version', { ascending: false }).limit(1);
+        .from('rule_sets').select('id, version, rules').order('version', { ascending: false }).limit(1);
       if (err) throw err;
       const latest = data?.[0];
       if (latest) {
@@ -38,9 +41,11 @@ export function RulesProvider({ children }: { children: ReactNode }) {
         if (problems.length > 0) throw new Error('Gespeicherte Provisionsregeln sind ungültig.');
         setRules(latest.rules as RuleSet);
         setVersion(latest.version as number);
+        setRuleSetId(latest.id as string);
       } else {
         setRules(DEFAULT_RULES);
         setVersion(0);
+        setRuleSetId(null);
       }
     } catch (e) {
       setError(describeError(e));
@@ -59,17 +64,18 @@ export function RulesProvider({ children }: { children: ReactNode }) {
       const { data, error: readErr } = await client.from('rule_sets').select('version').order('version', { ascending: false }).limit(1);
       if (readErr) throw readErr;
       const nextVersion = ((data?.[0]?.version as number | undefined) ?? 0) + 1;
-      const { error: insErr } = await client.from('rule_sets').insert({ version: nextVersion, rules: next });
+      const { data: created, error: insErr } = await client.from('rule_sets').insert({ version: nextVersion, rules: next }).select('id').single();
       if (insErr) throw insErr;
       setRules(next);
       setVersion(nextVersion);
+      setRuleSetId(created.id as string);
       return null;
     } catch (e) {
       return describeError(e);
     }
   }, []);
 
-  const value = useMemo(() => ({ rules, version, loading, error, saveNewVersion, reload }), [rules, version, loading, error, saveNewVersion, reload]);
+  const value = useMemo(() => ({ rules, version, ruleSetId, loading, error, saveNewVersion, reload }), [rules, version, ruleSetId, loading, error, saveNewVersion, reload]);
   return <RulesContext.Provider value={value}>{children}</RulesContext.Provider>;
 }
 

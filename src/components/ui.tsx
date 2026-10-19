@@ -1,5 +1,5 @@
 import { useId } from 'react';
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from 'react';
+import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
 
 type ButtonVariant = 'primary' | 'secondary' | 'ghost';
 const buttonStyles: Record<ButtonVariant, string> = {
@@ -75,5 +75,34 @@ export function SelectField({ label, children, className = '', ...select }: Sele
       <label htmlFor={id} className="mb-1 block text-sm font-medium text-anthracite-700">{label}</label>
       <select id={id} {...select} className={inputClass}>{children}</select>
     </div>
+  );
+}
+
+export function TextAreaField({ label, error, className = '', ...area }: TextareaHTMLAttributes<HTMLTextAreaElement> & { label: string; error?: string }) {
+  const id = useId();
+  return (
+    <div className={className}>
+      <label htmlFor={id} className="mb-1 block text-sm font-medium text-anthracite-700">{label}</label>
+      <textarea id={id} rows={3} {...area} aria-invalid={error ? true : undefined} className={inputClass} />
+      {error && <p className="mt-1 text-xs text-red-700">{error}</p>}
+    </div>
+  );
+}
+
+/** Ja/Nein-Auswahl als zwei Radio-Buttons (tastaturbedienbar, mit Beschriftung). */
+export function YesNo({ legend, value, onChange, hint, disabled }: { legend: string; value: boolean; onChange: (v: boolean) => void; hint?: string; disabled?: boolean }) {
+  const name = useId();
+  const opt = (v: boolean, text: string) => (
+    <label className={`cursor-pointer px-4 py-1.5 text-sm font-medium focus-within:ring-2 focus-within:ring-teal-500 ${value === v ? 'bg-navy-800 text-white' : 'bg-white text-anthracite-700 hover:bg-slate-50'} ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}>
+      <input type="radio" name={name} className="sr-only" checked={value === v} disabled={disabled} onChange={() => onChange(v)} />
+      {text}
+    </label>
+  );
+  return (
+    <fieldset>
+      <legend className="mb-1 text-sm font-medium text-anthracite-700">{legend}</legend>
+      <div className="inline-flex overflow-hidden rounded-md ring-1 ring-slate-300">{opt(false, 'Nein')}{opt(true, 'Ja')}</div>
+      {hint && <p className="mt-1 text-xs text-anthracite-600">{hint}</p>}
+    </fieldset>
   );
 }
