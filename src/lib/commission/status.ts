@@ -13,6 +13,11 @@ export interface OrderForStatus {
   customThresholdBps?: Bps | null;
   /** Vom Kunden bereits bezahlter Anteil (Basispunkte, 9500 = 95 %). */
   customerPaidBps: Bps;
+  /**
+   * Zahlungsschwellen, die zum Zeitpunkt der Berechnung galten (aus dem Auftrags-Snapshot).
+   * Haben Vorrang vor den aktuellen Einstellungen, damit Regeländerungen alte Aufträge nicht verändern.
+   */
+  payoutThresholds?: RuleSet['payoutThresholds'] | null;
   payouts: PayoutRecord[];
   statusOverride?: { status: CommissionStatus; reason: string } | null;
 }
@@ -58,7 +63,9 @@ export function computeOrderState(order: OrderForStatus, rules: Pick<RuleSet, 'p
     if (!isCents(p.amountCents) || p.amountCents <= 0) throw new RangeError('Auszahlungsbeträge müssen größer 0 sein');
   }
 
-  const thresholdBps = requiredPaymentBps(order.paymentModel, order.customThresholdBps, rules);
+  const own = order.payoutThresholds;
+  const thresholds = own && isBps(own.regularBps) && isBps(own.prepaymentBps) ? own : rules.payoutThresholds;
+  const thresholdBps = requiredPaymentBps(order.paymentModel, order.customThresholdBps, { payoutThresholds: thresholds });
   const eligible = order.customerPaidBps >= thresholdBps;
   const totalCents = order.commissionTotalCents;
   const paidCents = sumCents(order.payouts.map((p) => p.amountCents));

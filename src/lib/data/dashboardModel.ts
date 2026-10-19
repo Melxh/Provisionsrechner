@@ -17,7 +17,11 @@ export interface DbOrderRow {
   status_override_reason: string | null;
   commission_total_cents: number;
   archived_at: string | null;
+  order_number?: string | null;
+  /** calculation->rules->payoutThresholds aus dem Snapshot (kann bei sehr alten Zeilen fehlen). */
+  thresholds?: { regularBps: number; prepaymentBps: number } | null;
 }
+export interface DbAttachmentRef { id: string; order_id: string | null; payout_id: string | null; historical_payout_id: string | null }
 export interface DbPayoutRow { id: string; order_id: string; paid_on: string; amount_cents: number }
 export interface DbHistoricalRow {
   id: string;
@@ -42,6 +46,7 @@ export interface DashboardRow {
   tier: Tier | null;
   tierLabel: string;
   amountCents: Cents;
+  docCount: number;
 }
 
 export interface DashboardFilters {
@@ -65,7 +70,7 @@ export function periodFor(year: number | null, month: number | null): Period {
 const inPeriod = (d: string, p: Period) => (!p.from || d >= p.from) && (!p.to || d <= p.to);
 
 export function buildDashboard(
-  data: { orders: DbOrderRow[]; payouts: DbPayoutRow[]; historical: DbHistoricalRow[] },
+  data: { orders: DbOrderRow[]; payouts: DbPayoutRow[]; historical: DbHistoricalRow[]; attachments?: DbAttachmentRef[] },
   rules: Pick<RuleSet, 'payoutThresholds'>,
   period: Period,
   filters: DashboardFilters,
@@ -85,6 +90,7 @@ export function buildDashboard(
     paymentModel: o.payment_model,
     customThresholdBps: o.custom_threshold_bps,
     customerPaidBps: o.customer_paid_bps,
+    payoutThresholds: o.thresholds ?? null,
     statusOverride: o.status_override ? { status: o.status_override, reason: o.status_override_reason ?? '' } : null,
     payouts: (payoutsByOrder.get(o.id) ?? []).map((p) => ({ amountCents: p.amount_cents, paidOn: p.paid_on })),
   }));
@@ -96,6 +102,15 @@ export function buildDashboard(
     period,
   );
 
+  const docsByOrder = new Map<string, number>();
+  const docsByHistorical = new Map<string, number>();
+  const orderOfPayout = new Map(data.payouts.map((p) => [p.id, p.order_id]));
+  for (const a of data.attachments ?? []) {
+    const orderId = a.order_id ?? (a.payout_id ? orderOfPayout.get(a.payout_id) : undefined);
+    if (orderId) docsByOrder.set(orderId, (docsByOrder.get(orderId) ?? 0) + 1);
+    if (a.historical_payout_id) docsByHistorical.set(a.historical_payout_id, (docsByHistorical.get(a.historical_payout_id) ?? 0) + 1);
+  }
+
   const rows: DashboardRow[] = [];
   const stateById = new Map(summaryOrders.map((o) => [o.id, computeOrderState(o, rules)]));
   for (const o of data.orders) {
@@ -105,7 +120,7 @@ export function buildDashboard(
       key: `o-${o.id}`, kind: 'order', id: o.id, date: o.contract_date, customer: o.customer_name,
       projectType: o.project_type, projectLabel: PROJECT_TYPE_LABELS[o.project_type],
       status, statusLabel: STATUS_LABELS[status], tier: o.tier, tierLabel: TIER_LABELS[o.tier],
-      amountCents: o.commission_total_cents,
+      amountCents: o.commission_total_cents, docCount: docsByOrder.get(o.id) ?? 0,
     });
   }
   for (const h of data.historical) {
@@ -114,7 +129,7 @@ export function buildDashboard(
       key: `h-${h.id}`, kind: 'historical', id: h.id, date: h.paid_on, customer: h.customer_name,
       projectType: h.project_type, projectLabel: h.project_type ? PROJECT_TYPE_LABELS[h.project_type] : '–',
       status: 'historical', statusLabel: 'Historisch ausgezahlt', tier: null, tierLabel: '–',
-      amountCents: h.amount_cents,
+      amountCents: h.amount_cents, docCount: docsByHistorical.get(h.id) ?? 0,
     });
   }
 

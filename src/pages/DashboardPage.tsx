@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { loadDashboardData } from '../lib/data/dashboard';
 import { EMPTY_FILTERS, buildDashboard, periodFor } from '../lib/data/dashboardModel';
 import type { DashboardFilters, RowStatus } from '../lib/data/dashboardModel';
@@ -119,7 +120,7 @@ export default function DashboardPage() {
               <p className="py-6 text-center text-sm text-anthracite-600">Keine Einträge für die gewählten Filter.</p>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[40rem] text-left text-sm">
+                <table className="w-full min-w-[48rem] text-left text-sm">
                   <caption className="sr-only">Neueste Aufträge und Auszahlungen</caption>
                   <thead className="border-b border-slate-200 text-anthracite-600">
                     <tr>
@@ -128,7 +129,9 @@ export default function DashboardPage() {
                       <th scope="col" className="py-2 pr-3 font-medium">Projektart</th>
                       <th scope="col" className="py-2 pr-3 font-medium">Status</th>
                       <th scope="col" className="py-2 pr-3 font-medium">Stufe</th>
-                      <th scope="col" className="py-2 text-right font-medium">Provision</th>
+                      <th scope="col" className="py-2 pr-3 text-right font-medium">Provision</th>
+                      <th scope="col" className="py-2 pr-3 text-right font-medium">Dokumente</th>
+                      <th scope="col" className="py-2 font-medium"><span className="sr-only">Aktionen</span></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -139,14 +142,22 @@ export default function DashboardPage() {
                         <td className="py-2 pr-3">{r.projectLabel}</td>
                         <td className="py-2 pr-3"><span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[r.status]}`}>{r.statusLabel}</span></td>
                         <td className="py-2 pr-3">{r.tierLabel}</td>
-                        <td className="py-2 text-right tabular-nums">{formatEuro(r.amountCents)}</td>
+                        <td className="py-2 pr-3 text-right tabular-nums">{formatEuro(r.amountCents)}</td>
+                        <td className="py-2 pr-3 text-right tabular-nums">{r.docCount}</td>
+                        <td className="py-2 text-right">
+                          {r.kind === 'order'
+                            ? <>
+                                <Link to={`/kunden/${r.id}`} className="text-teal-700 underline" aria-label={`Auftrag ${r.customer} öffnen`}>Öffnen</Link>
+                                <Link to={`/kunden/${r.id}/bearbeiten`} className="ml-3 text-teal-700 underline" aria-label={`Auftrag ${r.customer} bearbeiten`}>Bearbeiten</Link>
+                              </>
+                            : <Link to="/historisch" className="text-teal-700 underline">Öffnen</Link>}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             )}
-            <p className="mt-3 text-xs text-anthracite-600">Dokument-Anzeige und Aktionen (Öffnen, Bearbeiten) kommen mit der Auftragsverwaltung.</p>
           </Card>
         </>
       )}

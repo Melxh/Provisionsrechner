@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../lib/auth/AuthProvider';
 import { useRules } from '../lib/rules/RulesProvider';
 import { useTier } from '../lib/tier/TierProvider';
@@ -12,14 +12,16 @@ import { formatEuro, formatPercent } from '../lib/commission/money';
 import { PERCENT_ADDON_KEYS, PROJECT_TYPES, TIERS } from '../lib/commission/types';
 import type { OwnLeadKind, PaymentModel, ProjectType, Tier } from '../lib/commission/types';
 import {
-  buildOrderPayload, includesHeatPump, includesPv, newAddonRow, newAdjustmentRow, newOrderForm, parseOrderForm, todayIso,
+  buildOrderPayload, formFromOrder, includesHeatPump, includesPv, newAddonRow, newAdjustmentRow, newOrderForm, parseOrderForm, todayIso,
 } from '../lib/orders/orderForm';
 import type { AddonKey, OrderFormState } from '../lib/orders/orderForm';
+import type { CalculationSnapshot } from '../lib/commission/types';
 import {
   ATTACHMENT_KIND_LABELS, MAX_FILES_PER_UPLOAD, formatFileSize, guessAttachmentKind, sniffMime, validateFileMeta,
 } from '../lib/orders/files';
 import type { AllowedMime, AttachmentKind } from '../lib/orders/files';
-import { createOrder, uploadAttachment } from '../lib/orders/ordersRepo';
+import { createOrder, loadOrderDetail, updateOrder, uploadAttachment } from '../lib/orders/ordersRepo';
+import type { OrderFull } from '../lib/orders/ordersRepo';
 import CalculationBreakdown from '../components/CalculationBreakdown';
 import { Alert, Button, Card, SelectField, Spinner, TextAreaField, TextField, YesNo } from '../components/ui';
 
@@ -59,13 +61,26 @@ function formatDate(iso: string) {
   return `${d}.${m}.${y}`;
 }
 
-export default function NewCommissionPage() {
+interface ExistingOrder { id: string; order: OrderFull; snapshot: CalculationSnapshot }
+
+/** Gemeinsamer Editor: ohne `existing` = neuer Auftrag, mit `existing` = Auftrag bearbeiten. */
+function OrderEditor({ existing }: { existing?: ExistingOrder }) {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user } = useAuth();
-  const { rules, version, ruleSetId, loading: rulesLoading, error: rulesError } = useRules();
+  const { rules: currentRules, version: currentVersion, ruleSetId: currentRuleSetId, loading: rulesLoading, error: rulesError } = useRules();
   const { tier: currentTier, loading: tierLoading } = useTier();
 
-  const [form, setForm] = useState<OrderFormState>(() => newOrderForm(currentTier, todayIso()));
-  const [tierTouched, setTierTouched] = useState(false);
+  // Beim Bearbeiten gelten standardmäßig die Regeln des Auftrags (keine stille Neuberechnung).
+  const [useCurrentRules, setUseCurrentRules] = useState(Boolean(existing) && searchParams.get('neu') === '1');
+  const keepOriginalRules = Boolean(existing) && !useCurrentRules;
+  const rules = keepOriginalRules && existing ? existing.snapshot.rules : currentRules;
+  const version = keepOriginalRules && existing ? (existing.snapshot.ruleSetVersion ?? 0) : currentVersion;
+  const ruleSetId = keepOriginalRules && existing ? existing.order.rule_set_id : currentRuleSetId;
+
+  const [form, setForm] = useState<OrderFormState>(() =>
+    existing ? formFromOrder(existing.order, existing.snapshot.input) : newOrderForm(currentTier, todayIso()));
+  const [tierTouched, setTierTouched] = useState(Boolean(existing));
   const [submitted, setSubmitted] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -153,6 +168,17 @@ export default function NewCommissionPage() {
     if (saving || !parsed.input || !parsed.meta || !outcome || !outcome.ok) return;
     setSaving(true);
     setSaveError(null);
+    if (existing) {
+      try {
+        const snapshot = buildSnapshot(parsed.input, rules, outcome, new Date(), version || null);
+        await updateOrder(existing.id, buildOrderPayload(parsed.meta, parsed.input, outcome.result, snapshot, ruleSetId));
+        navigate(`/kunden/${existing.id}`, { replace: true });
+      } catch (e) {
+        setSaveError(describeError(e));
+        setSaving(false);
+      }
+      return;
+    }
     let orderId: string;
     try {
       const snapshot = buildSnapshot(parsed.input, rules, outcome, new Date(), version || null);
@@ -239,7 +265,19 @@ export default function NewCommissionPage() {
   return (
     <div className="space-y-6">
       <div ref={topRef} />
-      <h1 className="text-2xl font-semibold text-navy-800">Neue Provision</h1>
+      <h1 className="text-2xl font-semibold text-navy-800">{existing ? `Auftrag bearbeiten: ${existing.order.customer_name}` : 'Neue Provision'}</h1>
+
+      {existing && (
+        <Alert kind={useCurrentRules ? 'warning' : 'info'} title={useCurrentRules ? 'Neuberechnung mit den aktuellen Regeln' : 'Berechnung mit den ursprünglichen Regeln'}>
+          {useCurrentRules
+            ? 'Beträge, Sätze und Zahlungsschwellen werden mit den aktuell gültigen Einstellungen neu berechnet. Die bisherige Berechnung bleibt im Verlauf des Auftrags gespeichert.'
+            : `Dieser Auftrag wird mit den Regeln vom ${new Date(existing.snapshot.calculatedAt).toLocaleDateString('de-DE')} (Regelversion ${existing.snapshot.ruleSetVersion ?? 'Standardwerte'}) berechnet. Spätere Änderungen der Einstellungen wirken nicht.`}
+          <label className="mt-2 flex items-start gap-2">
+            <input type="checkbox" className="mt-0.5 h-4 w-4" checked={useCurrentRules} onChange={(e) => setUseCurrentRules(e.target.checked)} />
+            <span>Mit den aktuellen Regeln neu berechnen</span>
+          </label>
+        </Alert>
+      )}
 
       {rulesError && <Alert kind="error" title="Speichern gesperrt">Die Provisionsregeln konnten nicht geladen werden. Bitte Seite neu laden.</Alert>}
       {submitted && !canSave && (
@@ -404,9 +442,22 @@ export default function NewCommissionPage() {
             {statusPreview && (
               <p className="mt-3 text-sm">Voraussichtlicher Provisionsstatus: <strong>{STATUS_LABELS[statusPreview.status]}</strong></p>
             )}
+            {existing && (
+              <div className="mt-4 grid gap-4 border-t border-slate-100 pt-4 sm:grid-cols-2">
+                <SelectField label="Manuelle Statuskorrektur (Sonderfall)" value={form.statusOverride} onChange={(e) => set('statusOverride', e.target.value as OrderFormState['statusOverride'])}>
+                  <option value="">Automatisch aus Zahlungsstand</option>
+                  <option value="expected">Erwartet</option>
+                  <option value="open">Offen</option>
+                  <option value="paid">Ausgezahlt / abgeschlossen</option>
+                </SelectField>
+                {form.statusOverride && (
+                  <TextField label="Begründung (Pflicht)" value={form.statusOverrideReason} onChange={(e) => set('statusOverrideReason', e.target.value)} error={visible('statusOverrideReason')} />
+                )}
+              </div>
+            )}
           </Section>
 
-          {/* H */}
+          {!existing && (
           <Section letter="H" title="Dokumente">
             <p className="mb-3 text-sm text-anthracite-600">Angebot, Auftragsbestätigung und weitere Dokumente (PDF, JPG, PNG, je max. 10 MB). Sie werden privat gespeichert und nach dem Speichern des Auftrags hochgeladen.</p>
             <input
@@ -431,6 +482,7 @@ export default function NewCommissionPage() {
               </ul>
             )}
           </Section>
+          )}
         </div>
 
         {/* Live-Berechnung */}
@@ -443,7 +495,7 @@ export default function NewCommissionPage() {
             ) : (
               <p className="text-sm text-anthracite-600">Bitte die markierten Eingaben korrigieren, dann erscheint die Berechnung.</p>
             )}
-            <Button className="mt-4 w-full" onClick={onSaveClick} disabled={saving || Boolean(rulesError)}>Auftrag speichern</Button>
+            <Button className="mt-4 w-full" onClick={onSaveClick} disabled={saving || Boolean(rulesError)}>{existing ? 'Änderungen speichern' : 'Auftrag speichern'}</Button>
             {submitted && !canSave && <p role="alert" className="mt-2 text-xs text-red-700">Speichern nicht möglich – bitte Eingaben prüfen.</p>}
           </Card>
         </aside>
@@ -453,7 +505,7 @@ export default function NewCommissionPage() {
       {confirming && result && parsed.meta && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="presentation">
           <div role="dialog" aria-modal="true" aria-labelledby="confirm-title" className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-lg bg-white p-5 shadow-xl">
-            <h2 id="confirm-title" className="text-lg font-semibold text-navy-800">Vorschau: Auftrag speichern?</h2>
+            <h2 id="confirm-title" className="text-lg font-semibold text-navy-800">{existing ? 'Vorschau: Änderungen speichern?' : 'Vorschau: Auftrag speichern?'}</h2>
             <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
               <dt className="text-anthracite-600">Kunde</dt><dd>{parsed.meta.customerName}</dd>
               <dt className="text-anthracite-600">Projektart</dt><dd>{PROJECT_TYPE_LABELS[parsed.meta.projectType]}</dd>
@@ -463,7 +515,11 @@ export default function NewCommissionPage() {
               <dt className="text-anthracite-600">Dokumente</dt><dd>{files.length === 0 ? 'keine' : `${files.length} Datei(en)`}</dd>
             </dl>
             <div className="mt-4"><CalculationBreakdown result={result} netPriceCents={pv ? parsed.input?.netPriceCents : undefined} /></div>
-            <p className="mt-3 text-xs text-anthracite-600">Die verwendeten Regeln (Version {version === 0 ? 'Standardwerte' : version}) werden mit dem Auftrag gespeichert und später nicht automatisch neu berechnet.</p>
+            <p className="mt-3 text-xs text-anthracite-600">
+              Die verwendeten Regeln (Version {version === 0 ? 'Standardwerte' : version}) werden mit dem Auftrag gespeichert und später nicht automatisch neu berechnet.
+              {existing && ' Die bisherige Berechnung bleibt im Verlauf erhalten, die Änderung wird protokolliert.'}
+            </p>
+            {existing && useCurrentRules && <div className="mt-3"><Alert kind="warning" title="Neuberechnung">Die Provision wird mit den aktuellen Regeln neu berechnet (bisher {formatEuro(existing.order.commission_total_cents)}).</Alert></div>}
             {saveError && <div className="mt-3"><Alert kind="error">{saveError}</Alert></div>}
             <div className="mt-4 flex justify-end gap-3">
               <Button variant="secondary" onClick={() => setConfirming(false)} disabled={saving}>Zurück</Button>
@@ -474,4 +530,33 @@ export default function NewCommissionPage() {
       )}
     </div>
   );
+}
+
+export default function NewCommissionPage() {
+  return <OrderEditor />;
+}
+
+/** Route /kunden/:id/bearbeiten – lädt den Auftrag und öffnet den Editor. */
+export function EditOrderPage() {
+  const { id = '' } = useParams();
+  const [existing, setExisting] = useState<ExistingOrder | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const d = await loadOrderDetail(id);
+        if (!active) return;
+        if (d) setExisting({ id: d.order.id, order: d.order, snapshot: d.order.calculation });
+        else setError('Der Auftrag existiert nicht (mehr).');
+      } catch (e) { if (active) setError(describeError(e)); } finally { if (active) setLoading(false); }
+    })();
+    return () => { active = false; };
+  }, [id]);
+
+  if (loading) return <Spinner label="Auftrag wird geladen …" />;
+  if (!existing) return <div className="space-y-3"><Alert kind="error">{error ?? 'Auftrag nicht gefunden.'}</Alert><Link to="/kunden" className="text-sm text-teal-700 underline">Zurück zur Übersicht</Link></div>;
+  return <OrderEditor existing={existing} />;
 }

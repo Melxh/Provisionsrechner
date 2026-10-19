@@ -11,7 +11,8 @@ Backend: Supabase (Login, PostgreSQL mit Row Level Security, privater Dateispeic
 ## Stand
 Fertig: Login/Logout/Passwort-Reset, geschützte Oberfläche, Stufenauswahl, Einstellungen (versionierte Regeln), Dashboard-Kennzahlen mit Filtern,
 Formular „Neue Provision“ (Live-Berechnung, Vorschau, Speichern, Dokument-Upload), Berechnungslogik, Status-/Auszahlungslogik, Exporte (Logik), Datenbankschema mit RLS und Tests.
-Noch offen: Auftragsverwaltung (Liste, Details, Bearbeiten, Teilzahlungen, Anhänge öffnen/löschen), historische Auszahlungen (Oberfläche), Auswertungen, Export-Oberfläche.
+Auftragsverwaltung: Liste mit Suche/Filtern, Detailansicht, Bearbeiten (ursprüngliche Regeln bleiben erhalten, Neuberechnung nur nach Bestätigung), Archivieren, Löschen, Auszahlungen/Teilzahlungen mit Nachweis, Dokumente öffnen/hochladen/löschen, Änderungsverlauf.
+Noch offen: historische Auszahlungen (Oberfläche), Auswertungen, Export-Oberfläche.
 
 ## Einrichtung
 
@@ -21,6 +22,7 @@ Noch offen: Auftragsverwaltung (Liste, Details, Bearbeiten, Teilzahlungen, Anhä
    1. `supabase/migrations/20261018000000_init.sql`
    2. `supabase/migrations/20261018000100_user_settings.sql`
    3. `supabase/migrations/20261018000200_create_order.sql`
+   4. `supabase/migrations/20261018000300_order_management.sql`
 3. Prüfen: unter **Storage** existiert der Bucket `documents` mit Status *Private*.
 
 ### 2. Registrierung abschalten, ersten Benutzer anlegen

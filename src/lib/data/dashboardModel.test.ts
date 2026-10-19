@@ -53,4 +53,22 @@ describe('Dashboard-Modell', () => {
     expect(buildDashboard(data, DEFAULT_RULES, {}, { ...EMPTY_FILTERS, status: 'historical' }).rows).toHaveLength(1);
     expect(buildDashboard(data, DEFAULT_RULES, periodFor(2025, null), EMPTY_FILTERS).rows.map((r) => r.customer)).toEqual(['Alt AG']);
   });
+
+  it('Schwellen aus dem Snapshot gelten, Dokumente werden gezählt', () => {
+    const d = {
+      orders: [order({ id: 'x', customer_paid_bps: 9_500, thresholds: { regularBps: 9_800, prepaymentBps: 10_000 } })],
+      payouts: [{ id: 'px', order_id: 'x', paid_on: '2026-10-12', amount_cents: 1 }],
+      historical: [{ id: 'hx', customer_name: 'Alt', paid_on: '2025-01-01', amount_cents: 5, project_type: null }],
+      attachments: [
+        { id: 'a1', order_id: 'x', payout_id: null, historical_payout_id: null },
+        { id: 'a2', order_id: null, payout_id: 'px', historical_payout_id: null },
+        { id: 'a3', order_id: null, payout_id: null, historical_payout_id: 'hx' },
+      ],
+    };
+    const { rows, summary } = buildDashboard(d, DEFAULT_RULES, {}, EMPTY_FILTERS);
+    expect(summary.openCents).toBe(0);
+    expect(summary.expectedCents).toBe(99_999);
+    expect(rows.find((r) => r.id === 'x')?.docCount).toBe(2);
+    expect(rows.find((r) => r.id === 'hx')?.docCount).toBe(1);
+  });
 });

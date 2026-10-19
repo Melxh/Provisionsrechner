@@ -1,9 +1,10 @@
 import type {
   AddonInput, AdjustmentInput, CalculationInput, CalculationResult, CalculationSnapshot,
-  OwnLeadKind, PaymentModel, ProjectType, Tier,
+  CommissionStatus, OwnLeadKind, PaymentModel, ProjectType, Tier,
 } from '../commission/types.ts';
 import { PERCENT_ADDON_KEYS } from '../commission/types.ts';
 import { parseEuroToCents, parsePercentToBps } from '../commission/money.ts';
+import { centsToDecimal } from '../commission/csv.ts';
 
 export type AddonKey = AddonInput['key'];
 
@@ -33,6 +34,9 @@ export interface OrderFormState {
   paymentModel: PaymentModel;
   customThreshold: string;
   customerPaid: string;
+  /** Nur beim Bearbeiten: manuelle Statuskorrektur (leer = automatisch). */
+  statusOverride: CommissionStatus | '';
+  statusOverrideReason: string;
 }
 
 export interface OrderMeta {
@@ -47,6 +51,8 @@ export interface OrderMeta {
   paymentModel: PaymentModel;
   customThresholdBps: number | null;
   customerPaidBps: number;
+  statusOverride: CommissionStatus | null;
+  statusOverrideReason: string | null;
 }
 
 export interface ParsedOrderForm {
@@ -75,6 +81,7 @@ export function newOrderForm(tier: Tier, today: string): OrderFormState {
     pvSecurePv: false, pvSecureHeatPump: false, siteManager: false,
     addons: [], adjustments: [],
     paymentModel: 'regular', customThreshold: '', customerPaid: '0',
+    statusOverride: '', statusOverrideReason: '',
   };
 }
 
@@ -178,6 +185,10 @@ export function parseOrderForm(form: OrderFormState): ParsedOrderForm {
   const paid = form.customerPaid.trim() === '' ? 0 : parsePercentToBps(form.customerPaid);
   if (paid === null) metaErrors.customerPaid = PCT_ERR;
 
+  if (form.statusOverride && !form.statusOverrideReason.trim()) {
+    metaErrors.statusOverrideReason = 'Eine manuelle Statuskorrektur braucht eine nachvollziehbare Begründung.';
+  }
+
   const input: CalculationInput = {
     tier: form.tier,
     projectType: form.projectType,
@@ -204,6 +215,8 @@ export function parseOrderForm(form: OrderFormState): ParsedOrderForm {
     paymentModel: form.paymentModel,
     customThresholdBps,
     customerPaidBps: paid ?? 0,
+    statusOverride: form.statusOverride || null,
+    statusOverrideReason: form.statusOverride ? form.statusOverrideReason.trim() : null,
   };
 
   return {
@@ -257,10 +270,64 @@ export function buildOrderPayload(
       custom_threshold_bps: meta.customThresholdBps,
       customer_paid_bps: meta.customerPaidBps,
       expected_payout_date: meta.expectedPayoutDate,
+      status_override: meta.statusOverride,
+      status_override_reason: meta.statusOverrideReason,
       rule_set_id: ruleSetId,
       calculation: snapshot,
     },
     addons,
     adjustments: input.adjustments.map((a) => ({ label: a.label.trim(), amount_cents: a.amountCents })),
+  };
+}
+
+export interface StoredOrderMeta {
+  customer_name: string;
+  project_type: ProjectType;
+  contract_date: string;
+  tier: Tier;
+  order_number: string | null;
+  confirmation_date: string | null;
+  expected_payout_date: string | null;
+  note: string | null;
+  payment_model: PaymentModel;
+  custom_threshold_bps: number | null;
+  customer_paid_bps: number;
+  status_override: CommissionStatus | null;
+  status_override_reason: string | null;
+}
+
+const pct = (bps: number) => centsToDecimal(bps).replace(/,00$/, '').replace(/(,\d)0$/, '$1');
+
+/** Umkehrung von parseOrderForm: gespeicherter Auftrag (Meta + Snapshot-Eingaben) → Formularzustand zum Bearbeiten. */
+export function formFromOrder(meta: StoredOrderMeta, input: CalculationInput): OrderFormState {
+  return {
+    customerName: meta.customer_name,
+    projectType: meta.project_type,
+    contractDate: meta.contract_date,
+    tier: meta.tier,
+    orderNumber: meta.order_number ?? '',
+    confirmationDate: meta.confirmation_date ?? '',
+    expectedPayoutDate: meta.expected_payout_date ?? '',
+    note: meta.note ?? '',
+    netPrice: input.netPriceCents > 0 ? centsToDecimal(input.netPriceCents) : '',
+    overprice: input.overpriceCents > 0 ? centsToDecimal(input.overpriceCents) : '',
+    ownLead: input.ownLead,
+    ownLeadConfirmed: input.ownLead, // beim Anlegen bereits bestätigt
+    ownLeadKind: input.ownLeadKind ?? '',
+    pvSecurePv: input.pvSecurePv,
+    pvSecureHeatPump: input.pvSecureHeatPump,
+    siteManager: input.siteManager,
+    addons: input.addons.map((a): AddonRow => {
+      const id = newRowId();
+      if (a.key === 'maintenance_package') return { id, key: a.key, label: a.label ?? '', netValue: '', rate: '', quantity: String(a.quantity ?? 1) };
+      if (a.key === 'custom') return { id, key: a.key, label: a.label, netValue: centsToDecimal(a.netValueCents), rate: pct(a.rateBps), quantity: '1' };
+      return { id, key: a.key, label: a.label ?? '', netValue: centsToDecimal(a.netValueCents), rate: '', quantity: '1' };
+    }),
+    adjustments: input.adjustments.map((a): AdjustmentRow => ({ id: newRowId(), label: a.label, amount: centsToDecimal(a.amountCents) })),
+    paymentModel: meta.payment_model,
+    customThreshold: meta.custom_threshold_bps === null ? '' : pct(meta.custom_threshold_bps),
+    customerPaid: pct(meta.customer_paid_bps),
+    statusOverride: meta.status_override ?? '',
+    statusOverrideReason: meta.status_override_reason ?? '',
   };
 }

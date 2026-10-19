@@ -39,16 +39,28 @@ export function safeStorageName(rawName: string): string {
   return ext ? `${stem}.${ext}` : stem;
 }
 
-export function buildStoragePath(userId: string, orderId: string, fileId: string, originalName: string): string {
-  return `${userId}/order/${orderId}/${fileId}-${safeStorageName(originalName)}`;
+export type StorageFolder = 'order' | 'payout' | 'historical';
+
+/** Pfad: <user_id>/<order|payout|historical>/<parent_id>/<file_id>-<name> – erster Teil muss die Benutzer-ID sein (Storage-Policy). */
+export function buildStoragePathIn(userId: string, folder: StorageFolder, parentId: string, fileId: string, originalName: string): string {
+  return `${userId}/${folder}/${parentId}/${fileId}-${safeStorageName(originalName)}`;
 }
 
-export type AttachmentKind = 'offer' | 'order_confirmation' | 'other';
+export function buildStoragePath(userId: string, orderId: string, fileId: string, originalName: string): string {
+  return buildStoragePathIn(userId, 'order', orderId, fileId, originalName);
+}
+
+export type AttachmentKind = 'offer' | 'order_confirmation' | 'other' | 'payout_proof' | 'historical_proof';
 export const ATTACHMENT_KIND_LABELS: Record<AttachmentKind, string> = {
   offer: 'Angebot',
   order_confirmation: 'Auftragsbestätigung',
   other: 'Weiteres Dokument',
+  payout_proof: 'Auszahlungsnachweis',
+  historical_proof: 'Beleg / Abrechnung',
 };
+
+/** Auswahl beim Hochladen zu einem Auftrag. */
+export const ORDER_DOC_KINDS: AttachmentKind[] = ['offer', 'order_confirmation', 'other'];
 
 export function guessAttachmentKind(fileName: string): AttachmentKind {
   const n = fileName.toLowerCase();

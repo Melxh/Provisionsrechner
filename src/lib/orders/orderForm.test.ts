@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { calculateCommission, buildSnapshot } from '../commission/calculate.ts';
 import { DEFAULT_RULES } from '../commission/rules.ts';
-import { buildOrderPayload, newAddonRow, newAdjustmentRow, newOrderForm, parseOrderForm, todayIso } from './orderForm.ts';
+import { buildOrderPayload, formFromOrder, newAddonRow, newAdjustmentRow, newOrderForm, parseOrderForm, todayIso } from './orderForm.ts';
 import type { OrderFormState } from './orderForm.ts';
 
 const base = (over: Partial<OrderFormState> = {}): OrderFormState => ({
@@ -108,5 +108,39 @@ describe('Speicher-Payload', () => {
     expect(payload.addons[1]).toMatchObject({ product_key: 'maintenance_package', kind: 'fixed', net_value_cents: null, commission_cents: 37_500 });
     // 1.800 + 1.180 + 180 + 375 − 295
     expect(outcome.result.totalCents).toBe(180_000 + 118_000 + 18_000 + 37_500 - 29_500);
+  });
+});
+
+describe('Bearbeiten: gespeicherter Auftrag → Formular → identische Eingaben', () => {
+  it('Hin- und Rückumwandlung verändert nichts', () => {
+    const a1 = { ...newAddonRow('ev_charger_a'), netValue: '1.000' };
+    const a2 = { ...newAddonRow('custom'), label: 'Sonderprodukt', netValue: '500', rate: '5,5' };
+    const a3 = { ...newAddonRow('maintenance_package'), quantity: '2' };
+    const adj = { ...newAdjustmentRow(), label: 'Korrektur', amount: '-100' };
+    const original = parseOrderForm(base({
+      overprice: '2.000,50', ownLead: true, ownLeadConfirmed: true, pvSecurePv: true, siteManager: true,
+      addons: [a1, a2, a3], adjustments: [adj], paymentModel: 'custom', customThreshold: '80', customerPaid: '82,5',
+      orderNumber: 'A-7', note: 'Notiz',
+    }));
+    expect(original.errors).toEqual({});
+    const stored = {
+      customer_name: original.meta!.customerName, project_type: original.meta!.projectType, contract_date: original.meta!.contractDate,
+      tier: original.meta!.tier, order_number: original.meta!.orderNumber, confirmation_date: original.meta!.confirmationDate,
+      expected_payout_date: original.meta!.expectedPayoutDate, note: original.meta!.note, payment_model: original.meta!.paymentModel,
+      custom_threshold_bps: original.meta!.customThresholdBps, customer_paid_bps: original.meta!.customerPaidBps,
+      status_override: null, status_override_reason: null,
+    };
+    const again = parseOrderForm(formFromOrder(stored, original.input!));
+    expect(again.errors).toEqual({});
+    expect(again.input).toEqual(original.input);
+    expect(again.meta).toEqual(original.meta);
+  });
+
+  it('manuelle Statuskorrektur braucht eine Begründung', () => {
+    expect(parseOrderForm(base({ statusOverride: 'open' })).errors.statusOverrideReason).toBeTruthy();
+    const ok = parseOrderForm(base({ statusOverride: 'open', statusOverrideReason: ' Kulanz ' }));
+    expect(ok.meta?.statusOverride).toBe('open');
+    expect(ok.meta?.statusOverrideReason).toBe('Kulanz');
+    expect(parseOrderForm(base()).meta?.statusOverrideReason).toBeNull();
   });
 });

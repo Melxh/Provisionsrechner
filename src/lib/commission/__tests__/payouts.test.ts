@@ -215,3 +215,13 @@ describe('Exporte (Test 22)', () => {
     expect(parsed.data.orders[0].commissionTotalCents).toBe(123_456);
   });
 });
+
+describe('Zahlungsschwellen aus dem Auftrags-Snapshot', () => {
+  it('geänderte aktuelle Einstellungen verändern bestehende Aufträge nicht', () => {
+    const o = order({ customerPaidBps: 9_500, payoutThresholds: { regularBps: 9_800, prepaymentBps: 10_000 } });
+    expect(computeOrderState(o, DEFAULT_RULES).status).toBe('expected');
+    const loose = { payoutThresholds: { regularBps: 5_000, prepaymentBps: 5_000 } };
+    expect(computeOrderState(o, loose).status).toBe('expected');
+    expect(computeOrderState(order({ customerPaidBps: 9_500 }), loose).status).toBe('open');
+  });
+});

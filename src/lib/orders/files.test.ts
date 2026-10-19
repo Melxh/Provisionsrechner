@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildStoragePath, guessAttachmentKind, safeStorageName, sniffMime, validateFileMeta } from './files.ts';
+import { buildStoragePath, buildStoragePathIn, guessAttachmentKind, safeStorageName, sniffMime, validateFileMeta } from './files.ts';
 
 describe('Dateiprüfung', () => {
   it('akzeptiert PDF/JPG/PNG bis 10 MB', () => {
@@ -34,6 +34,10 @@ describe('Speicherpfad', () => {
     expect(p).toBe('uid-1/order/order-1/file-1-Angebot_1.pdf');
     expect(p.split('/')[0]).toBe('uid-1');
     expect(p.split('/')).toHaveLength(4);
+  });
+  it('Ordner für Auszahlungsnachweise und historische Belege', () => {
+    expect(buildStoragePathIn('u', 'payout', 'p1', 'f1', 'Beleg.pdf')).toBe('u/payout/p1/f1-Beleg.pdf');
+    expect(buildStoragePathIn('u', 'historical', 'h1', 'f1', 'x.png').split('/')[0]).toBe('u');
   });
   it('rät die Dokumentart aus dem Dateinamen', () => {
     expect(guessAttachmentKind('Angebot_123.pdf')).toBe('offer');
